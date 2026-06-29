@@ -490,3 +490,71 @@ func TestServFlowHistoryAndReplay(t *testing.T) {
 	_ = os.Remove(inst.ID + ".state")
 	_ = os.Remove(replayInst.ID + ".state")
 }
+
+func TestServFlowDAGValidationAndVisualization(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/workflows/validate", handleValidate)
+	mux.HandleFunc("/api/workflows/visualize", handleVisualize)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// 1. Send cyclic workflow def -> should fail validation (400 Bad Request)
+	cyclicPayload := WorkflowDef{
+		ID: "cyclic-flow",
+		Tasks: []Task{
+			{Name: "TaskA", DependsOn: []string{"TaskB"}},
+			{Name: "TaskB", DependsOn: []string{"TaskA"}},
+		},
+	}
+	bodyC, _ := json.Marshal(cyclicPayload)
+	respC, err := http.Post(testServer.URL+"/api/workflows/validate", "application/json", bytes.NewReader(bodyC))
+	if err != nil {
+		t.Fatalf("validate failed: %v", err)
+	}
+	defer respC.Body.Close()
+
+	if respC.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected StatusBadRequest (400) for cyclic flow, got %d", respC.StatusCode)
+	}
+
+	var validRes struct {
+		Valid bool   `json:"valid"`
+		Error string `json:"error"`
+	}
+	json.NewDecoder(respC.Body).Decode(&validRes)
+	if validRes.Valid || !strings.Contains(validRes.Error, "Cyclic dependency") {
+		t.Errorf("invalid cycle validation response: %+v", validRes)
+	}
+
+	// 2. Send valid DAG -> should succeed validation (200 OK)
+	validPayload := WorkflowDef{
+		ID: "valid-flow",
+		Tasks: []Task{
+			{Name: "TaskA", DependsOn: nil},
+			{Name: "TaskB", DependsOn: []string{"TaskA"}},
+		},
+	}
+	bodyV, _ := json.Marshal(validPayload)
+	respV, err := http.Post(testServer.URL+"/api/workflows/validate", "application/json", bytes.NewReader(bodyV))
+	if err != nil || respV.StatusCode != http.StatusOK {
+		t.Fatalf("validation failed for valid flow: %v", err)
+	}
+	respV.Body.Close()
+
+	// 3. Request visualization -> should return correct Mermaid representation
+	respVis, err := http.Post(testServer.URL+"/api/workflows/visualize", "application/json", bytes.NewReader(bodyV))
+	if err != nil || respVis.StatusCode != http.StatusOK {
+		t.Fatalf("visualize failed: %v", err)
+	}
+	defer respVis.Body.Close()
+
+	var visRes struct {
+		Mermaid string `json:"mermaid"`
+	}
+	json.NewDecoder(respVis.Body).Decode(&visRes)
+
+	if !strings.Contains(visRes.Mermaid, "TaskA --> TaskB") || !strings.Contains(visRes.Mermaid, "graph TD") {
+		t.Errorf("unexpected mermaid output: %q", visRes.Mermaid)
+	}
+}

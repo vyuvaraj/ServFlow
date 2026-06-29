@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -79,6 +80,8 @@ func main() {
 	mux.HandleFunc("/api/workflows/instances/", handleGetInstance)
 	mux.HandleFunc("/api/workflows/history", handleHistory)
 	mux.HandleFunc("/api/workflows/replay", handleReplay)
+	mux.HandleFunc("/api/workflows/validate", handleValidate)
+	mux.HandleFunc("/api/workflows/visualize", handleVisualize)
 
 	serverHandler := ServShared.AuthMiddleware(mux)
 
@@ -412,6 +415,97 @@ func handleReplay(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(newInst)
+}
+
+func hasCycle(def WorkflowDef) bool {
+	adj := make(map[string][]string)
+	for _, task := range def.Tasks {
+		for _, dep := range task.DependsOn {
+			adj[dep] = append(adj[dep], task.Name)
+		}
+	}
+
+	visited := make(map[string]int)
+	var dfs func(node string) bool
+	dfs = func(node string) bool {
+		visited[node] = 1
+		for _, neighbor := range adj[node] {
+			if visited[neighbor] == 1 {
+				return true
+			}
+			if visited[neighbor] == 0 {
+				if dfs(neighbor) {
+					return true
+				}
+			}
+		}
+		visited[node] = 2
+		return false
+	}
+
+	for _, task := range def.Tasks {
+		if visited[task.Name] == 0 {
+			if dfs(task.Name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func handleValidate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var def WorkflowDef
+	if err := json.NewDecoder(r.Body).Decode(&def); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	if hasCycle(def) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"valid":false,"error":"Cyclic dependency detected"}`))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"valid":true}`))
+}
+
+func handleVisualize(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var def WorkflowDef
+	if err := json.NewDecoder(r.Body).Decode(&def); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString("graph TD\n")
+	for _, task := range def.Tasks {
+		if len(task.DependsOn) == 0 {
+			sb.WriteString(fmt.Sprintf("    %s\n", task.Name))
+		} else {
+			for _, dep := range task.DependsOn {
+				sb.WriteString(fmt.Sprintf("    %s --> %s\n", dep, task.Name))
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"mermaid": sb.String(),
+	})
 }
 
 // runWorkflow executes tasks in DAG dependency order
