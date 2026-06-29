@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -156,5 +157,69 @@ func TestServFlowDurableExecution(t *testing.T) {
 
 	// Clean up checkpoint file
 	time.Sleep(50 * time.Millisecond)
+	_ = os.Remove(inst.ID + ".state")
+}
+
+func TestServFlowSagaCompensation(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/workflows/define", handleDefine)
+	mux.HandleFunc("/api/workflows/execute", handleExecute)
+	mux.HandleFunc("/api/workflows/instances/", handleGetInstance)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// Define DAG with compensation actions: Task A (success, with rollback) -> Task B (fail)
+	defPayload := WorkflowDef{
+		ID: "saga-flow",
+		Tasks: []Task{
+			{Name: "ChargeCard", DependsOn: nil, Action: "success", CompensateAction: "RefundCard"},
+			{Name: "ReserveSeat", DependsOn: []string{"ChargeCard"}, Action: "fail"}, // triggers failure and rollback
+		},
+	}
+	body, _ := json.Marshal(defPayload)
+	resp, _ := http.Post(testServer.URL+"/api/workflows/define", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	// Execute
+	execPayload := map[string]string{"workflow_id": "saga-flow"}
+	execBody, _ := json.Marshal(execPayload)
+	execResp, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
+	var inst WorkflowInstance
+	json.NewDecoder(execResp.Body).Decode(&inst)
+	execResp.Body.Close()
+
+	// Wait for execution and rollback
+	time.Sleep(100 * time.Millisecond)
+
+	// Query Instance status
+	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
+	var finalInst WorkflowInstance
+	json.NewDecoder(getResp.Body).Decode(&finalInst)
+	getResp.Body.Close()
+
+	if finalInst.Status != "failed" {
+		t.Fatalf("expected saga workflow to fail overall, got %q", finalInst.Status)
+	}
+
+	// Verify that ChargeCard was compensated
+	if finalInst.TaskStates["ChargeCard"].Status != "compensated" {
+		t.Errorf("expected ChargeCard status to be compensated, got %q", finalInst.TaskStates["ChargeCard"].Status)
+	}
+
+	// Check that logs mention the compensation rollback
+	foundSagaLog := false
+	for _, l := range finalInst.Logs {
+		if idx := strings.Index(l, "[SAGA] Executing compensation rollback for task ChargeCard: RefundCard"); idx >= 0 {
+			foundSagaLog = true
+			break
+		}
+	}
+
+	if !foundSagaLog {
+		t.Errorf("expected saga rollback execution print in logs, got %v", finalInst.Logs)
+	}
+
+	// Clean up state file
 	_ = os.Remove(inst.ID + ".state")
 }

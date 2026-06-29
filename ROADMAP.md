@@ -7,7 +7,7 @@ This roadmap outlines the planned development phases for the ServFlow workflow o
 ## Phase 1: Core DAG Orchestrator (In Progress)
 - [x] **DAG-based workflow definitions** — Step execution, dependencies, and task runner. [June 29, 2026]
 - [x] **Durable execution** — State checkpointing and mid-run restart survivability. [June 29, 2026]
-- [ ] **Compensation / rollback** — Automatic saga failure reversal execution.
+- [x] **Compensation / rollback** — Automatic saga failure reversal execution. [June 29, 2026]
 - [ ] **Event-triggered workflows** — Trigger execution via ServQueue.
 - [ ] **Serv-lang integration** — Native workflow engine syntax support.
 

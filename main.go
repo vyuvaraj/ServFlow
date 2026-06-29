@@ -15,9 +15,10 @@ import (
 )
 
 type Task struct {
-	Name      string   `json:"name"`
-	DependsOn []string `json:"depends_on"`
-	Action    string   `json:"action"` // e.g. "http://..." or "mock-success"
+	Name             string   `json:"name"`
+	DependsOn        []string `json:"depends_on"`
+	Action           string   `json:"action"` // e.g. "http://..." or "mock-success"
+	CompensateAction string   `json:"compensate_action,omitempty"`
 }
 
 type WorkflowDef struct {
@@ -317,7 +318,19 @@ func runWorkflow(inst *WorkflowInstance, def WorkflowDef) {
 				state.Error = err.Error()
 				inst.Status = "failed"
 				inst.FinishedAt = time.Now()
-				inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s failed: %v. Workflow failed.", task.Name, err))
+				inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s failed: %v. Initiating Saga compensation...", task.Name, err))
+				
+				// Saga Rollback logic:
+				// Traverse tasks in reverse order. For completed tasks, trigger Compensation action.
+				for i := len(def.Tasks) - 1; i >= 0; i-- {
+					t := def.Tasks[i]
+					tState := inst.TaskStates[t.Name]
+					if tState.Status == "completed" && t.CompensateAction != "" {
+						inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Executing compensation rollback for task %s: %s", t.Name, t.CompensateAction))
+						tState.Status = "compensated"
+					}
+				}
+
 				inst.mu.Unlock()
 				saveCheckpoint(inst)
 				return
