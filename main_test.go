@@ -399,3 +399,94 @@ func TestServFlowHumanApprovalGates(t *testing.T) {
 
 	_ = os.Remove(inst.ID + ".state")
 }
+
+func TestServFlowHistoryAndReplay(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/workflows/define", handleDefine)
+	mux.HandleFunc("/api/workflows/execute", handleExecute)
+	mux.HandleFunc("/api/workflows/history", handleHistory)
+	mux.HandleFunc("/api/workflows/replay", handleReplay)
+	mux.HandleFunc("/api/workflows/instances/", handleGetInstance)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// 1. Define DAG Workflow
+	defPayload := WorkflowDef{
+		ID: "replay-flow",
+		Tasks: []Task{
+			{Name: "Task1", DependsOn: nil, Action: "success"},
+		},
+	}
+	body, _ := json.Marshal(defPayload)
+	resp, _ := http.Post(testServer.URL+"/api/workflows/define", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	// 2. Execute
+	execPayload := map[string]string{"workflow_id": "replay-flow"}
+	execBody, _ := json.Marshal(execPayload)
+	execResp, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
+	var inst WorkflowInstance
+	json.NewDecoder(execResp.Body).Decode(&inst)
+	execResp.Body.Close()
+
+	// Wait briefly to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// 3. Query history
+	histResp, err := http.Get(testServer.URL + "/api/workflows/history")
+	if err != nil {
+		t.Fatalf("failed to query history: %v", err)
+	}
+	defer histResp.Body.Close()
+
+	var history []WorkflowInstance
+	json.NewDecoder(histResp.Body).Decode(&history)
+
+	found := false
+	for _, h := range history {
+		if h.ID == inst.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected to find completed instance %s in history", inst.ID)
+	}
+
+	// 4. Trigger replay
+	replayPayload := map[string]string{"instance_id": inst.ID}
+	replayBody, _ := json.Marshal(replayPayload)
+	replayResp, err := http.Post(testServer.URL+"/api/workflows/replay", "application/json", bytes.NewReader(replayBody))
+	if err != nil {
+		t.Fatalf("replay post failed: %v", err)
+	}
+	defer replayResp.Body.Close()
+
+	if replayResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected StatusCreated, got %d", replayResp.StatusCode)
+	}
+
+	var replayInst WorkflowInstance
+	json.NewDecoder(replayResp.Body).Decode(&replayInst)
+
+	if replayInst.ID == "" || replayInst.ID == inst.ID {
+		t.Errorf("expected new instance ID for replay, got %q", replayInst.ID)
+	}
+
+	// Wait briefly for replay completion
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify replay completed successfully!
+	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + replayInst.ID)
+	var finalReplay WorkflowInstance
+	json.NewDecoder(getResp.Body).Decode(&finalReplay)
+	getResp.Body.Close()
+
+	if finalReplay.Status != "completed" {
+		t.Errorf("expected replay workflow to complete, got %q. Logs: %v", finalReplay.Status, finalReplay.Logs)
+	}
+
+	_ = os.Remove(inst.ID + ".state")
+	_ = os.Remove(replayInst.ID + ".state")
+}

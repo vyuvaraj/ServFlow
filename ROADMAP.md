@@ -14,4 +14,4 @@ This roadmap outlines the planned development phases for the ServFlow workflow o
 ## Phase 2: Workflow Management
 - [x] **Human approval gates** — Execution pauses pending manual approval. [June 29, 2026]
 - [x] **Timeout & retry policies** — Configurable step timeouts and retry strategies. [June 29, 2026]
-- [ ] **Execution history** — Complete audit trail logs.
+- [x] **Execution history** — Complete audit trail logs and replay support. [June 29, 2026]

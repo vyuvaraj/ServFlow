@@ -77,6 +77,8 @@ func main() {
 	mux.HandleFunc("/api/workflows/resume", handleResume)
 	mux.HandleFunc("/api/workflows/approve", handleApprove)
 	mux.HandleFunc("/api/workflows/instances/", handleGetInstance)
+	mux.HandleFunc("/api/workflows/history", handleHistory)
+	mux.HandleFunc("/api/workflows/replay", handleReplay)
 
 	serverHandler := ServShared.AuthMiddleware(mux)
 
@@ -328,6 +330,88 @@ func handleGetInstance(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(inst)
+}
+
+func handleHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	mu.RLock()
+	defer mu.RUnlock()
+
+	var history []*WorkflowInstance
+	for _, inst := range instances {
+		inst.mu.RLock()
+		if inst.Status == "completed" || inst.Status == "failed" {
+			history = append(history, inst)
+		}
+		inst.mu.RUnlock()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(history)
+}
+
+func handleReplay(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		InstanceID string `json:"instance_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	mu.Lock()
+	oldInst, exists := instances[req.InstanceID]
+	mu.Unlock()
+
+	if !exists {
+		http.Error(w, "Original instance not found", http.StatusNotFound)
+		return
+	}
+
+	mu.RLock()
+	def, defExists := definitions[oldInst.WorkflowID]
+	mu.RUnlock()
+
+	if !defExists {
+		http.Error(w, "Workflow definition not found", http.StatusNotFound)
+		return
+	}
+
+	newID := fmt.Sprintf("inst-%d-replay", time.Now().UnixNano())
+	newInst := &WorkflowInstance{
+		ID:         newID,
+		WorkflowID: oldInst.WorkflowID,
+		Status:     "running",
+		TaskStates: make(map[string]*TaskStatus),
+		Logs:       []string{fmt.Sprintf("Workflow replay of %s initialized.", req.InstanceID)},
+		StartedAt:  time.Now(),
+	}
+
+	for _, task := range def.Tasks {
+		newInst.TaskStates[task.Name] = &TaskStatus{
+			Status: "pending",
+		}
+	}
+
+	mu.Lock()
+	instances[newID] = newInst
+	mu.Unlock()
+
+	go runWorkflow(newInst, def)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(newInst)
 }
 
 // runWorkflow executes tasks in DAG dependency order
