@@ -223,3 +223,103 @@ func TestServFlowSagaCompensation(t *testing.T) {
 	// Clean up state file
 	_ = os.Remove(inst.ID + ".state")
 }
+
+func TestServFlowRetriesAndTimeouts(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/workflows/define", handleDefine)
+	mux.HandleFunc("/api/workflows/execute", handleExecute)
+	mux.HandleFunc("/api/workflows/instances/", handleGetInstance)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// 1. Define DAG Workflow with Retry: Task A fails, but retries up to 2 times
+	defPayloadRetry := WorkflowDef{
+		ID: "retry-flow",
+		Tasks: []Task{
+			{Name: "RetryTask", DependsOn: nil, Action: "fail", RetryCount: 2},
+		},
+	}
+	body, _ := json.Marshal(defPayloadRetry)
+	resp, _ := http.Post(testServer.URL+"/api/workflows/define", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	// Execute
+	execPayload := map[string]string{"workflow_id": "retry-flow"}
+	execBody, _ := json.Marshal(execPayload)
+	execResp, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
+	var inst WorkflowInstance
+	json.NewDecoder(execResp.Body).Decode(&inst)
+	execResp.Body.Close()
+
+	// Wait for execution and retries (3 attempts total: original + 2 retries)
+	time.Sleep(150 * time.Millisecond)
+
+	// Query Instance status
+	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
+	var finalInst WorkflowInstance
+	json.NewDecoder(getResp.Body).Decode(&finalInst)
+	getResp.Body.Close()
+
+	if finalInst.Status != "failed" {
+		t.Fatalf("expected workflow to eventually fail, got %q", finalInst.Status)
+	}
+
+	// Verify that retries were logged
+	foundRetryLog := false
+	for _, l := range finalInst.Logs {
+		if strings.Contains(l, "failed attempt 1") || strings.Contains(l, "failed attempt 2") {
+			foundRetryLog = true
+			break
+		}
+	}
+	if !foundRetryLog {
+		t.Errorf("expected retry logs in workflow instance, got: %v", finalInst.Logs)
+	}
+	_ = os.Remove(inst.ID + ".state")
+
+	// 2. Define DAG Workflow with Timeout: Task A sleeps 100ms, but has a 30ms timeout
+	defPayloadTimeout := WorkflowDef{
+		ID: "timeout-flow",
+		Tasks: []Task{
+			{Name: "SlowTask", DependsOn: nil, Action: "sleep-100", TimeoutMs: 30},
+		},
+	}
+	body2, _ := json.Marshal(defPayloadTimeout)
+	resp2, _ := http.Post(testServer.URL+"/api/workflows/define", "application/json", bytes.NewReader(body2))
+	resp2.Body.Close()
+
+	// Execute
+	execPayload2 := map[string]string{"workflow_id": "timeout-flow"}
+	execBody2, _ := json.Marshal(execPayload2)
+	execResp2, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody2))
+	var inst2 WorkflowInstance
+	json.NewDecoder(execResp2.Body).Decode(&inst2)
+	execResp2.Body.Close()
+
+	// Wait for execution and timeout
+	time.Sleep(150 * time.Millisecond)
+
+	// Query Instance status
+	getResp2, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst2.ID)
+	var finalInst2 WorkflowInstance
+	json.NewDecoder(getResp2.Body).Decode(&finalInst2)
+	getResp2.Body.Close()
+
+	if finalInst2.Status != "failed" {
+		t.Fatalf("expected workflow to fail due to timeout, got %q", finalInst2.Status)
+	}
+
+	// Verify that timeout failure was logged
+	foundTimeoutLog := false
+	for _, l := range finalInst2.Logs {
+		if strings.Contains(l, "task timed out after 30ms") {
+			foundTimeoutLog = true
+			break
+		}
+	}
+	if !foundTimeoutLog {
+		t.Errorf("expected timeout log in workflow instance, got: %v", finalInst2.Logs)
+	}
+	_ = os.Remove(inst2.ID + ".state")
+}

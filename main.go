@@ -19,6 +19,8 @@ type Task struct {
 	DependsOn        []string `json:"depends_on"`
 	Action           string   `json:"action"` // e.g. "http://..." or "mock-success"
 	CompensateAction string   `json:"compensate_action,omitempty"`
+	RetryCount       int      `json:"retry_count,omitempty"`
+	TimeoutMs        int      `json:"timeout_ms,omitempty"`
 }
 
 type WorkflowDef struct {
@@ -308,8 +310,45 @@ func runWorkflow(inst *WorkflowInstance, def WorkflowDef) {
 			inst.mu.Unlock()
 			saveCheckpoint(inst)
 
-			// Run action logic (simulation)
-			err := executeTaskAction(task)
+			// Run action logic with retry and timeout simulation
+			var err error
+			attempts := 1
+			maxAttempts := 1
+			if task.RetryCount > 0 {
+				maxAttempts = task.RetryCount + 1
+			}
+
+			for {
+				if task.TimeoutMs > 0 {
+					// Execute with timeout constraint
+					errChan := make(chan error, 1)
+					go func() {
+						errChan <- executeTaskAction(task)
+					}()
+					select {
+					case err = <-errChan:
+						// completed before timeout
+					case <-time.After(time.Duration(task.TimeoutMs) * time.Millisecond):
+						err = fmt.Errorf("task timed out after %dms", task.TimeoutMs)
+					}
+				} else {
+					err = executeTaskAction(task)
+				}
+
+				if err == nil {
+					break
+				}
+
+				if attempts >= maxAttempts {
+					break
+				}
+
+				inst.mu.Lock()
+				inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s failed attempt %d: %v. Retrying...", task.Name, attempts, err))
+				inst.mu.Unlock()
+				attempts++
+				time.Sleep(10 * time.Millisecond) // initial backoff sleep
+			}
 
 			inst.mu.Lock()
 			state.FinishedAt = time.Now()
@@ -378,7 +417,12 @@ func saveCheckpoint(inst *WorkflowInstance) {
 
 func executeTaskAction(t Task) error {
 	// Simple simulation
-	time.Sleep(10 * time.Millisecond)
+	if t.Action == "sleep-100" {
+		time.Sleep(100 * time.Millisecond)
+	} else {
+		time.Sleep(10 * time.Millisecond)
+	}
+
 	if t.Action == "fail" {
 		return errors.New("simulated action failure")
 	}
