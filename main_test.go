@@ -11,7 +11,15 @@ import (
 	"time"
 )
 
+func setupTest() {
+	mu.Lock()
+	definitions = make(map[string]WorkflowDef)
+	instances = make(map[string]*WorkflowInstance)
+	mu.Unlock()
+}
+
 func TestServFlowDAGExecution(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/workflows/define", handleDefine)
 	mux.HandleFunc("/api/workflows/execute", handleExecute)
@@ -78,6 +86,7 @@ func TestServFlowDAGExecution(t *testing.T) {
 }
 
 func TestServFlowDurableExecution(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/workflows/define", handleDefine)
 	mux.HandleFunc("/api/workflows/execute", handleExecute)
@@ -161,6 +170,7 @@ func TestServFlowDurableExecution(t *testing.T) {
 }
 
 func TestServFlowSagaCompensation(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/workflows/define", handleDefine)
 	mux.HandleFunc("/api/workflows/execute", handleExecute)
@@ -225,6 +235,7 @@ func TestServFlowSagaCompensation(t *testing.T) {
 }
 
 func TestServFlowRetriesAndTimeouts(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/workflows/define", handleDefine)
 	mux.HandleFunc("/api/workflows/execute", handleExecute)
@@ -325,6 +336,7 @@ func TestServFlowRetriesAndTimeouts(t *testing.T) {
 }
 
 func TestServFlowHumanApprovalGates(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/workflows/define", handleDefine)
 	mux.HandleFunc("/api/workflows/execute", handleExecute)
@@ -401,6 +413,7 @@ func TestServFlowHumanApprovalGates(t *testing.T) {
 }
 
 func TestServFlowHistoryAndReplay(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/workflows/define", handleDefine)
 	mux.HandleFunc("/api/workflows/execute", handleExecute)
@@ -492,6 +505,7 @@ func TestServFlowHistoryAndReplay(t *testing.T) {
 }
 
 func TestServFlowDAGValidationAndVisualization(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/workflows/validate", handleValidate)
 	mux.HandleFunc("/api/workflows/visualize", handleVisualize)
@@ -556,5 +570,53 @@ func TestServFlowDAGValidationAndVisualization(t *testing.T) {
 
 	if !strings.Contains(visRes.Mermaid, "TaskA --> TaskB") || !strings.Contains(visRes.Mermaid, "graph TD") {
 		t.Errorf("unexpected mermaid output: %q", visRes.Mermaid)
+	}
+}
+
+func TestTableDrivenWorkflowValidation(t *testing.T) {
+	setupTest()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/workflows/define", handleDefine)
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	tests := []struct {
+		name       string
+		id         string
+		tasks      []Task
+		wantStatus int
+	}{
+		{
+			name:       "Missing ID",
+			id:         "",
+			tasks:      []Task{{Name: "TaskA"}},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "Empty Tasks",
+			id:         "empty-flow",
+			tasks:      nil,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := WorkflowDef{
+				ID:    tt.id,
+				Tasks: tt.tasks,
+			}
+			body, _ := json.Marshal(payload)
+			resp, err := http.Post(testServer.URL+"/api/workflows/define", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("failed to make request: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != tt.wantStatus {
+				t.Errorf("expected status %d, got %d", tt.wantStatus, resp.StatusCode)
+			}
+		})
 	}
 }
