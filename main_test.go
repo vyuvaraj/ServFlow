@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -619,5 +620,30 @@ func TestTableDrivenWorkflowValidation(t *testing.T) {
 				t.Errorf("expected status %d, got %d", tt.wantStatus, resp.StatusCode)
 			}
 		})
+	}
+}
+
+func BenchmarkWorkflowDefinitionLookup(b *testing.B) {
+	setupTest()
+	// Pre-populate definitions
+	for i := 0; i < 1000; i++ {
+		wfID := fmt.Sprintf("workflow-%d", i)
+		mu.Lock()
+		definitions[wfID] = WorkflowDef{
+			ID: wfID,
+			Tasks: []Task{
+				{Name: "step-a", Action: "mock-success"},
+				{Name: "step-b", DependsOn: []string{"step-a"}, Action: "mock-success"},
+			},
+		}
+		mu.Unlock()
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		key := fmt.Sprintf("workflow-%d", i%1000)
+		mu.RLock()
+		_, _ = definitions[key]
+		mu.RUnlock()
 	}
 }
