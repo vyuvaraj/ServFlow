@@ -54,6 +54,61 @@ var (
 	mu          sync.RWMutex
 )
 
+var storeClient *ServShared.StoreClient
+
+func initStore() {
+	storeClient = ServShared.NewStoreClient()
+	loadStateFromStore()
+}
+
+func loadStateFromStore() {
+	// Load definitions
+	if data, err := storeClient.Get("serv-flow-state", "definitions.json"); err == nil {
+		mu.Lock()
+		var loadedDefs map[string]WorkflowDef
+		if json.Unmarshal(data, &loadedDefs) == nil {
+			definitions = loadedDefs
+			log.Printf("[PERSISTENCE] Loaded %d workflow definitions from ServStore", len(definitions))
+		}
+		mu.Unlock()
+	}
+
+	// Load instances
+	if data, err := storeClient.Get("serv-flow-state", "instances.json"); err == nil {
+		mu.Lock()
+		var loadedInsts map[string]*WorkflowInstance
+		if json.Unmarshal(data, &loadedInsts) == nil {
+			instances = loadedInsts
+			log.Printf("[PERSISTENCE] Loaded %d workflow instances from ServStore", len(instances))
+		}
+		mu.Unlock()
+	}
+}
+
+func saveDefinitionsToStore() {
+	if storeClient == nil {
+		return
+	}
+	mu.RLock()
+	data, err := json.Marshal(definitions)
+	mu.RUnlock()
+	if err == nil {
+		_ = storeClient.Put("serv-flow-state", "definitions.json", data)
+	}
+}
+
+func saveInstancesToStore() {
+	if storeClient == nil {
+		return
+	}
+	mu.RLock()
+	data, err := json.Marshal(instances)
+	mu.RUnlock()
+	if err == nil {
+		_ = storeClient.Put("serv-flow-state", "instances.json", data)
+	}
+}
+
 func main() {
 	portStr := flag.String("port", "8096", "ServFlow server port")
 	flag.Parse()
@@ -62,6 +117,8 @@ func main() {
 	if port == "" {
 		port = *portStr
 	}
+
+	initStore()
 
 	mux := http.NewServeMux()
 
@@ -111,6 +168,7 @@ func handleDefine(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	definitions[def.ID] = def
 	mu.Unlock()
+	saveDefinitionsToStore()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -186,7 +244,14 @@ func handleResume(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stateFile := fmt.Sprintf("%s.state", req.InstanceID)
-	data, err := os.ReadFile(stateFile)
+	var data []byte
+	var err error
+	if storeClient != nil {
+		data, err = storeClient.Get("serv-flow-state", stateFile)
+	}
+	if err != nil || len(data) == 0 {
+		data, err = os.ReadFile(stateFile)
+	}
 	if err != nil {
 		http.Error(w, "State checkpoint not found: "+err.Error(), http.StatusNotFound)
 		return
@@ -665,14 +730,22 @@ func runWorkflow(inst *WorkflowInstance, def WorkflowDef) {
 
 func saveCheckpoint(inst *WorkflowInstance) {
 	inst.mu.RLock()
-	defer inst.mu.RUnlock()
-
 	data, err := json.Marshal(inst)
+	inst.mu.RUnlock()
 	if err != nil {
 		return
 	}
 
+	if storeClient != nil {
+		_ = storeClient.Put("serv-flow-state", fmt.Sprintf("%s.state", inst.ID), data)
+	}
+
 	_ = os.WriteFile(fmt.Sprintf("%s.state", inst.ID), data, 0644)
+
+	mu.Lock()
+	instances[inst.ID] = inst
+	mu.Unlock()
+	saveInstancesToStore()
 }
 
 func executeTaskAction(t Task) error {
