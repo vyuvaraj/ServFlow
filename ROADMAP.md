@@ -32,3 +32,20 @@ This roadmap outlines the planned development phases for the ServFlow workflow o
 ## Phase 6: Productization & Visual Editing (Pending)
 - [ ] **Interactive Visual Workflow Designer** — Drag-and-drop stateful workflow editor generating native `serv-lang` code (UI.4)
 - [ ] **Time-Travel Workflow Replay** — Debug complex workflow errors by replaying trace logs step-by-step locally (DX.13)
+
+## Phase 7: Package Extraction & Reliability (Pending — July 2026)
+
+> **Issues:** `main.go` is 803 lines. 20+ `.state` files committed to repo. No `pkg/` structure.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 7.1 | **Clean `.state` files from repo** | Small | Add `*.state` to `.gitignore`, remove committed state files from git history | [ ] |
+| 7.2 | **Extract `pkg/engine/`** | Medium | Move DAG execution engine, step scheduling, and dependency resolution into dedicated package | [ ] |
+| 7.3 | **Extract `pkg/saga/`** | Medium | Move compensation/rollback logic and durable saga state machine into dedicated package | [ ] |
+| 7.4 | **Extract `pkg/api/`** | Small | Move HTTP handlers and approval gate endpoints into dedicated package | [ ] |
+| 7.5 | **Workflow versioning** | Medium | Support multiple active versions of a workflow definition. New instances use latest; running instances continue on their version | [ ] |
+| 7.6 | **Conditional branching** | Medium | Support `if/else` step routing based on output of previous step. Dynamic path selection in DAG | [ ] |
+| 7.7 | **Sub-workflow invocation** | Medium | Call another workflow as a step. Enables composition and reuse of workflow patterns | [ ] |
+| 7.8 | **Parallel step execution** | Small | Execute independent steps concurrently (fan-out) and join results before dependent steps | [ ] |
+
+> See [UNIFIED_ROADMAP.md](../servverse-repo/UNIFIED_ROADMAP.md) for the full ecosystem priority matrix.
