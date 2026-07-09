@@ -51,6 +51,7 @@ type WorkflowInstance struct {
 	FinishedAt  time.Time             `json:"finished_at,omitempty"`
 	Logs        []string              `json:"logs"`
 	ReplayLog   []ReplaySnapshot      `json:"replay_log,omitempty"` // DX.13: time-travel snapshots
+	Traceparent string                `json:"traceparent,omitempty"`
 	Mu          sync.RWMutex          `json:"-"`
 }
 

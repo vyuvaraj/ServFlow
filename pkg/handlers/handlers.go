@@ -128,12 +128,13 @@ func (ctx *HandlerContext) HandleExecute(w http.ResponseWriter, r *http.Request)
 	}
 
 	inst := &storage.WorkflowInstance{
-		ID:         instanceID,
-		WorkflowID: req.WorkflowID,
-		Status:     "running",
-		TaskStates: taskStates,
-		StartedAt:  time.Now(),
-		Logs:       []string{fmt.Sprintf("Workflow %s started.", req.WorkflowID)},
+		ID:          instanceID,
+		WorkflowID:  req.WorkflowID,
+		Status:      "running",
+		TaskStates:  taskStates,
+		StartedAt:   time.Now(),
+		Logs:        []string{fmt.Sprintf("Workflow %s started.", req.WorkflowID)},
+		Traceparent: r.Header.Get("traceparent"),
 	}
 
 	ctx.Mu.Lock()
@@ -191,6 +192,9 @@ func (ctx *HandlerContext) HandleResume(w http.ResponseWriter, r *http.Request) 
 	}
 
 	instPointer := &inst
+	if tp := r.Header.Get("traceparent"); tp != "" {
+		instPointer.Traceparent = tp
+	}
 
 	isCompensating := false
 	for _, state := range inst.TaskStates {
@@ -385,12 +389,13 @@ func (ctx *HandlerContext) HandleReplay(w http.ResponseWriter, r *http.Request) 
 
 	newID := fmt.Sprintf("inst-%d-replay", time.Now().UnixNano())
 	newInst := &storage.WorkflowInstance{
-		ID:         newID,
-		WorkflowID: oldInst.WorkflowID,
-		Status:     "running",
-		TaskStates: make(map[string]*storage.TaskStatus),
-		Logs:       []string{fmt.Sprintf("Workflow replay of %s initialized.", req.InstanceID)},
-		StartedAt:  time.Now(),
+		ID:          newID,
+		WorkflowID:  oldInst.WorkflowID,
+		Status:      "running",
+		TaskStates:  make(map[string]*storage.TaskStatus),
+		Logs:        []string{fmt.Sprintf("Workflow replay of %s initialized.", req.InstanceID)},
+		StartedAt:   time.Now(),
+		Traceparent: r.Header.Get("traceparent"),
 	}
 
 	for _, task := range def.Tasks {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-stomp/stomp/v3"
+	"github.com/vyuvaraj/ServShared"
 	"servflow/pkg/storage"
 )
 
@@ -76,6 +77,18 @@ func RunWorkflow(
 	instances map[string]*storage.WorkflowInstance,
 	instancesMu *sync.RWMutex,
 ) {
+	workflowSpan := ServShared.StartSpan(fmt.Sprintf("servflow:WORKFLOW %s", inst.WorkflowID), inst.Traceparent)
+	var workflowErr error
+	defer func() {
+		if workflowSpan != nil {
+			ServShared.EndSpan(workflowSpan, workflowErr, map[string]interface{}{
+				"workflow.id":       inst.WorkflowID,
+				"workflow.instance": inst.ID,
+				"workflow.status":   inst.Status,
+			})
+		}
+	}()
+
 	completedCount := 0
 	inst.Mu.RLock()
 	for _, state := range inst.TaskStates {
@@ -91,6 +104,7 @@ func RunWorkflow(
 		inst.Mu.Lock()
 		if inst.Status == "failed" {
 			inst.Mu.Unlock()
+			workflowErr = fmt.Errorf("workflow execution failed")
 			return
 		}
 		inst.Mu.Unlock()
@@ -137,6 +151,15 @@ func RunWorkflow(
 			inst.Mu.Unlock()
 			SaveCheckpoint(inst, store, instances, instancesMu)
 
+			// Start task tracing span
+			var taskTraceparent string
+			if workflowSpan != nil {
+				taskTraceparent = fmt.Sprintf("00-%s-%s-01", workflowSpan.TraceID, workflowSpan.SpanID)
+			} else {
+				taskTraceparent = inst.Traceparent
+			}
+			taskSpan := ServShared.StartSpan(fmt.Sprintf("servflow:TASK %s", task.Name), taskTraceparent)
+
 			// Run action logic with retry and timeout simulation
 			var err error
 			attempts := 1
@@ -177,6 +200,13 @@ func RunWorkflow(
 				time.Sleep(10 * time.Millisecond) // initial backoff sleep
 			}
 
+			if taskSpan != nil {
+				ServShared.EndSpan(taskSpan, err, map[string]interface{}{
+					"task.name":     task.Name,
+					"task.attempts": attempts,
+				})
+			}
+
 			inst.Mu.Lock()
 			state.FinishedAt = time.Now()
 			if err != nil {
@@ -190,6 +220,7 @@ func RunWorkflow(
 				SaveCheckpoint(inst, store, instances, instancesMu)
 
 				// Trigger durable saga rollback/compensations
+				workflowErr = err
 				go RollbackSaga(inst, def, store, instances, instancesMu)
 				return
 			} else {
@@ -211,6 +242,7 @@ func RunWorkflow(
 			inst.Logs = append(inst.Logs, "Cycle detected in DAG definition. Workflow aborted.")
 			inst.Mu.Unlock()
 			SaveCheckpoint(inst, store, instances, instancesMu)
+			workflowErr = fmt.Errorf("cycle detected in DAG definition")
 			return
 		}
 	}
