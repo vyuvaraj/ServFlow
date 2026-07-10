@@ -105,6 +105,11 @@ func main() {
 		port = *portStr
 	}
 
+	standalone := ServShared.IsStandalone()
+	if standalone {
+		log.Println("[INFO] ServFlow: Running in standalone mode. Store persistence redirected to local directory.")
+	}
+
 	initStore()
 
 	mux := http.NewServeMux()
