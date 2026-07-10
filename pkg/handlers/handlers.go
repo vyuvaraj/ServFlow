@@ -148,6 +148,13 @@ func (ctx *HandlerContext) HandleExecute(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(inst)
 }
 
+// Enterprise hooks for saga checkpoints (overridden in EE build)
+var (
+	EnterpriseLoadCheckpoint = func(instanceID string, store storage.WorkflowStore) ([]byte, error) {
+		return nil, nil
+	}
+)
+
 func (ctx *HandlerContext) HandleResume(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -165,11 +172,16 @@ func (ctx *HandlerContext) HandleResume(w http.ResponseWriter, r *http.Request) 
 	stateFile := fmt.Sprintf("%s.state", req.InstanceID)
 	var data []byte
 	var err error
-	if ctx.WorkflowStore != nil && ctx.WorkflowStore.GetClient() != nil {
-		data, err = ctx.WorkflowStore.GetClient().Get("serv-flow-state", stateFile)
-	}
-	if err != nil || len(data) == 0 {
-		data, err = os.ReadFile(stateFile)
+
+	if edata, eerr := EnterpriseLoadCheckpoint(req.InstanceID, ctx.WorkflowStore); edata != nil || eerr != nil {
+		data, err = edata, eerr
+	} else {
+		if ctx.WorkflowStore != nil && ctx.WorkflowStore.GetClient() != nil {
+			data, err = ctx.WorkflowStore.GetClient().Get("serv-flow-state", stateFile)
+		}
+		if err != nil || len(data) == 0 {
+			data, err = os.ReadFile(stateFile)
+		}
 	}
 	if err != nil {
 		http.Error(w, "State checkpoint not found: "+err.Error(), http.StatusNotFound)

@@ -255,6 +255,13 @@ func RunWorkflow(
 	SaveCheckpoint(inst, store, instances, instancesMu)
 }
 
+// Enterprise hooks for saga checkpoints (overridden in EE build)
+var (
+	EnterpriseSaveCheckpoint = func(inst *storage.WorkflowInstance, data []byte, store storage.WorkflowStore) bool {
+		return false
+	}
+)
+
 func SaveCheckpoint(
 	inst *storage.WorkflowInstance,
 	store storage.WorkflowStore,
@@ -268,11 +275,12 @@ func SaveCheckpoint(
 		return
 	}
 
-	if store != nil && store.GetClient() != nil {
-		_ = store.GetClient().Put("serv-flow-state", fmt.Sprintf("%s.state", inst.ID), data)
+	if handled := EnterpriseSaveCheckpoint(inst, data, store); !handled {
+		if store != nil && store.GetClient() != nil {
+			_ = store.GetClient().Put("serv-flow-state", fmt.Sprintf("%s.state", inst.ID), data)
+		}
+		_ = os.WriteFile(fmt.Sprintf("%s.state", inst.ID), data, 0644)
 	}
-
-	_ = os.WriteFile(fmt.Sprintf("%s.state", inst.ID), data, 0644)
 
 	instancesMu.Lock()
 	instances[inst.ID] = inst
