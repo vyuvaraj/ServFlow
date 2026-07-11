@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"servflow/pkg/engine"
+	"servflow/pkg/handlers"
 	"servflow/pkg/storage"
 )
 
@@ -1024,6 +1025,9 @@ func TestPluggableSagaCoordinator(t *testing.T) {
 }
 
 func TestVisualDesignerOSS(t *testing.T) {
+	if handlers.IsVisualDesignerSupported {
+		t.Skip("Skipping: Visual Designer is supported in this Enterprise build")
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/workflows/designer/save", handleDesignerSave)
 	testServer := httptest.NewServer(mux)
