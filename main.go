@@ -96,6 +96,10 @@ func handleCompensateComplete(w http.ResponseWriter, r *http.Request) {
 	getContext().HandleCompensateComplete(w, r)
 }
 
+func handleDesignerSave(w http.ResponseWriter, r *http.Request) {
+	getContext().HandleDesignerSave(w, r)
+}
+
 func main() {
 	portStr := flag.String("port", "8096", "ServFlow server port")
 	flag.Parse()
@@ -134,6 +138,7 @@ func main() {
 	mux.HandleFunc("/api/workflows/validate", handleValidate)
 	mux.HandleFunc("/api/workflows/visualize", handleVisualize)
 	mux.HandleFunc("/api/workflows/compensate/complete", handleCompensateComplete)
+	mux.HandleFunc("/api/workflows/designer/save", handleDesignerSave)
 
 	serverHandler := ServShared.TraceMiddleware("servflow", ServShared.AuthMiddleware(mux))
 

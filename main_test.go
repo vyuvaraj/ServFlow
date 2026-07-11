@@ -1023,4 +1023,30 @@ func TestPluggableSagaCoordinator(t *testing.T) {
 	_ = os.Remove(inst.ID + ".state")
 }
 
+func TestVisualDesignerOSS(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/workflows/designer/save", handleDesignerSave)
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	resp, err := http.Post(testServer.URL+"/api/workflows/designer/save", "application/json", nil)
+	if err != nil {
+		t.Fatalf("failed to request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden, got %d", resp.StatusCode)
+	}
+
+	var res struct {
+		Error string `json:"error"`
+	}
+	json.NewDecoder(resp.Body).Decode(&res)
+	if !strings.Contains(res.Error, "requires ServFlow Enterprise Edition") {
+		t.Errorf("expected EE warning, got %q", res.Error)
+	}
+}
+
+
 
