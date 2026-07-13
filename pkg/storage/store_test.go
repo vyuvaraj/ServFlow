@@ -45,3 +45,53 @@ func TestSaveInstancesMissingClient(t *testing.T) {
 		t.Error("expected error saving with nil client")
 	}
 }
+
+func TestSQLWorkflowStore_SQLite(t *testing.T) {
+	s, err := NewSQLWorkflowStore("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to create SQL store: %v", err)
+	}
+	defer s.Close()
+
+	// Test definitions save/load
+	defs := map[string]WorkflowDef{
+		"flow1": {
+			ID: "flow1",
+			Tasks: []Task{
+				{Name: "task1", Action: "action1"},
+			},
+		},
+	}
+	if err := s.SaveDefinitions(defs); err != nil {
+		t.Fatalf("failed to save definitions: %v", err)
+	}
+
+	loadedDefs, err := s.LoadDefinitions()
+	if err != nil {
+		t.Fatalf("failed to load definitions: %v", err)
+	}
+	if len(loadedDefs) != 1 || loadedDefs["flow1"].ID != "flow1" {
+		t.Errorf("incorrect loaded definitions: %+v", loadedDefs)
+	}
+
+	// Test instances save/load
+	insts := map[string]*WorkflowInstance{
+		"inst1": {
+			ID:         "inst1",
+			WorkflowID: "flow1",
+			Status:     "running",
+			TaskStates: make(map[string]*TaskStatus),
+		},
+	}
+	if err := s.SaveInstances(insts); err != nil {
+		t.Fatalf("failed to save instances: %v", err)
+	}
+
+	loadedInsts, err := s.LoadInstances()
+	if err != nil {
+		t.Fatalf("failed to load instances: %v", err)
+	}
+	if len(loadedInsts) != 1 || loadedInsts["inst1"].WorkflowID != "flow1" {
+		t.Errorf("incorrect loaded instances: %+v", loadedInsts)
+	}
+}

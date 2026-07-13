@@ -24,9 +24,22 @@ var (
 
 var workflowStore storage.WorkflowStore
 
-func initStore() {
-	client := ServShared.NewStoreClient()
-	workflowStore = storage.NewServStoreWorkflowStore(client)
+func initStore(dbDriver, dbURL string) {
+	if dbURL != "" {
+		drv := dbDriver
+		if drv == "" {
+			drv = "sqlite"
+		}
+		store, err := storage.NewSQLWorkflowStore(drv, dbURL)
+		if err != nil {
+			log.Fatalf("failed to initialize SQL workflow store: %v", err)
+		}
+		workflowStore = store
+		log.Printf("[INFO] ServFlow using SQL database storage backend: driver=%s", drv)
+	} else {
+		client := ServShared.NewStoreClient()
+		workflowStore = storage.NewServStoreWorkflowStore(client)
+	}
 	loadStateFromStore()
 }
 
@@ -102,6 +115,8 @@ func handleDesignerSave(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	portStr := flag.String("port", "8096", "ServFlow server port")
+	dbDriverStr := flag.String("database-driver", "", "Database driver (sqlite, postgres, mysql)")
+	dbURLStr := flag.String("database-url", "", "Database URL/DSN connection string")
 	flag.Parse()
 
 	port := os.Getenv("PORT")
@@ -109,12 +124,22 @@ func main() {
 		port = *portStr
 	}
 
+	dbDriver := os.Getenv("DATABASE_DRIVER")
+	if dbDriver == "" {
+		dbDriver = *dbDriverStr
+	}
+
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = *dbURLStr
+	}
+
 	standalone := ServShared.IsStandalone()
 	if standalone {
 		log.Println("[INFO] ServFlow: Running in standalone mode. Store persistence redirected to local directory.")
 	}
 
-	initStore()
+	initStore(dbDriver, dbURL)
 
 	mux := http.NewServeMux()
 
