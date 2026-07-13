@@ -124,6 +124,9 @@ func (s *SQLWorkflowStore) LoadDefinitions() (map[string]WorkflowDef, error) {
 		}
 		defs[id] = def
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	log.Printf("[PERSISTENCE] Loaded %d workflow definitions from SQL (%s)", len(defs), s.driver)
 	return defs, nil
 }
@@ -177,6 +180,9 @@ func (s *SQLWorkflowStore) LoadInstances() (map[string]*WorkflowInstance, error)
 			return nil, err
 		}
 		insts[id] = &inst
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	log.Printf("[PERSISTENCE] Loaded %d workflow instances from SQL (%s)", len(insts), s.driver)
 	return insts, nil
