@@ -1104,7 +1104,7 @@ func TestCheckpointRecoveryAccuracy(t *testing.T) {
 	// Modify checkpoint state so Task2 is marked "running" to simulate crash mid-Task2
 	checkpointInst.TaskStates["Task2"].Status = "running"
 	checkpointInst.TaskStates["Task2"].StartedAt = time.Now()
-	modifiedData, _ := json.Marshal(checkpointInst)
+	modifiedData, _ := json.Marshal(&checkpointInst)
 	os.WriteFile(statePath, modifiedData, 0644)
 
 	// 3. Resume from checkpoint
