@@ -207,14 +207,20 @@ func TestServFlowSagaCompensation(t *testing.T) {
 	json.NewDecoder(execResp.Body).Decode(&inst)
 	execResp.Body.Close()
 
-	// Wait for execution and rollback
-	time.Sleep(100 * time.Millisecond)
-
-	// Query Instance status
-	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
+	// Wait for execution and rollback to complete (up to 2 seconds)
 	var finalInst storage.WorkflowInstance
-	json.NewDecoder(getResp.Body).Decode(&finalInst)
-	getResp.Body.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		getResp, err := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
+		if err == nil {
+			json.NewDecoder(getResp.Body).Decode(&finalInst)
+			getResp.Body.Close()
+			if finalInst.Status == "failed" && finalInst.TaskStates["ChargeCard"].Status == "compensated" {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	if finalInst.Status != "failed" {
 		t.Fatalf("expected saga workflow to fail overall, got %q", finalInst.Status)
