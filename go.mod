@@ -6,7 +6,7 @@ require (
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/go-stomp/stomp/v3 v3.1.5
 	github.com/lib/pq v1.12.3
-	github.com/vyuvaraj/ServShared v1.0.2-0.20260714131806-8f86487bce70
+	github.com/vyuvaraj/ServShared v1.0.2-0.20260716090546-226c70693c88
 	modernc.org/sqlite v1.53.0
 )
 
