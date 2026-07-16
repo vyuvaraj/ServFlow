@@ -256,3 +256,50 @@ func TestHasCycleComplexCycle(t *testing.T) {
 		t.Error("expected cycle")
 	}
 }
+
+func TestAIClassifyAndConditionalBranching(t *testing.T) {
+	inst := &storage.WorkflowInstance{
+		TaskStates: map[string]*storage.TaskStatus{
+			"classify_task": {Name: "classify_task", Status: "pending"},
+			"approve_path":  {Name: "approve_path", Status: "pending"},
+			"review_path":   {Name: "review_path", Status: "pending"},
+		},
+	}
+	def := storage.WorkflowDef{
+		ID: "ai-flow-test",
+		Tasks: []storage.Task{
+			{
+				Name:   "classify_task",
+				Action: `ai.classify("this transaction is suspicious", ["approve", "review", "reject"])`,
+			},
+			{
+				Name:      "approve_path",
+				DependsOn: []string{"classify_task:approve"},
+				Action:    "mock-success",
+			},
+			{
+				Name:      "review_path",
+				DependsOn: []string{"classify_task:review"},
+				Action:    "mock-success",
+			},
+		},
+	}
+	var mu sync.RWMutex
+	RunWorkflow(inst, def, nil, make(map[string]*storage.WorkflowInstance), &mu)
+
+	if inst.TaskStates["classify_task"].Status != "completed" {
+		t.Errorf("expected classify_task to be completed, got %s", inst.TaskStates["classify_task"].Status)
+	}
+	if inst.TaskStates["classify_task"].Result != "review" {
+		t.Errorf("expected classify_task result to be 'review', got %s", inst.TaskStates["classify_task"].Result)
+	}
+	if inst.TaskStates["approve_path"].Status != "skipped" {
+		t.Errorf("expected approve_path to be skipped, got %s", inst.TaskStates["approve_path"].Status)
+	}
+	if inst.TaskStates["review_path"].Status != "completed" {
+		t.Errorf("expected review_path to be completed, got %s", inst.TaskStates["review_path"].Status)
+	}
+	if inst.Status != "completed" {
+		t.Errorf("expected overall workflow to complete successfully, got %s", inst.Status)
+	}
+}

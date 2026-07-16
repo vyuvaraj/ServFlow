@@ -26,10 +26,11 @@ type WorkflowDef struct {
 
 type TaskStatus struct {
 	Name       string    `json:"name"`
-	Status     string    `json:"status"` // pending, running, completed, failed
+	Status     string    `json:"status"` // pending, running, completed, failed, skipped
 	StartedAt  time.Time `json:"started_at,omitempty"`
 	FinishedAt time.Time `json:"finished_at,omitempty"`
 	Error      string    `json:"error,omitempty"`
+	Result     string    `json:"result,omitempty"`
 }
 
 // ReplaySnapshot captures the workflow state at a single execution step for time-travel replay.

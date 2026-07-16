@@ -101,7 +101,7 @@ func RunWorkflow(
 	completedCount := 0
 	inst.Mu.RLock()
 	for _, state := range inst.TaskStates {
-		if state.Status == "completed" {
+		if state.Status == "completed" || state.Status == "skipped" {
 			completedCount++
 		}
 	}
@@ -130,12 +130,43 @@ func RunWorkflow(
 
 			// Check if dependencies are satisfied
 			depsSatisfied := true
+			shouldSkip := false
 			for _, dep := range task.DependsOn {
-				depState, exists := inst.TaskStates[dep]
-				if !exists || depState.Status != "completed" {
+				depName := dep
+				branchName := ""
+				if idx := strings.Index(dep, ":"); idx > -1 {
+					depName = dep[:idx]
+					branchName = dep[idx+1:]
+				}
+
+				depState, exists := inst.TaskStates[depName]
+				if !exists {
 					depsSatisfied = false
 					break
 				}
+				if depState.Status == "skipped" {
+					shouldSkip = true
+					break
+				}
+				if depState.Status != "completed" {
+					depsSatisfied = false
+					break
+				}
+				if branchName != "" && depState.Result != branchName {
+					shouldSkip = true
+					break
+				}
+			}
+
+			if shouldSkip {
+				state.Status = "skipped"
+				inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s skipped due to branch condition.", task.Name))
+				recordReplaySnapshot(inst, task.Name, "skipped", fmt.Sprintf("Task %s skipped due to branch condition", task.Name))
+				completedCount++
+				progressMade = true
+				inst.Mu.Unlock()
+				SaveCheckpoint(inst, store, instances, instancesMu)
+				continue
 			}
 
 			if !depsSatisfied {
@@ -191,6 +222,7 @@ func RunWorkflow(
 
 			// Run action logic with retry and timeout simulation
 			var err error
+			var classifyResult string
 			attempts := 1
 			maxAttempts := 1
 			if task.RetryCount > 0 {
@@ -201,17 +233,30 @@ func RunWorkflow(
 				if task.TimeoutMs > 0 {
 					// Execute with timeout constraint
 					errChan := make(chan error, 1)
+					resChan := make(chan string, 1)
 					go func() {
-						errChan <- ExecuteTaskAction(task)
+						if strings.HasPrefix(task.Action, "ai.classify(") {
+							res, cErr := RunAIClassify(task.Action)
+							resChan <- res
+							errChan <- cErr
+						} else {
+							errChan <- ExecuteTaskAction(task)
+						}
 					}()
 					select {
 					case err = <-errChan:
-						// completed before timeout
+						if err == nil && strings.HasPrefix(task.Action, "ai.classify(") {
+							classifyResult = <-resChan
+						}
 					case <-time.After(time.Duration(task.TimeoutMs) * time.Millisecond):
 						err = fmt.Errorf("task timed out after %dms", task.TimeoutMs)
 					}
 				} else {
-					err = ExecuteTaskAction(task)
+					if strings.HasPrefix(task.Action, "ai.classify(") {
+						classifyResult, err = RunAIClassify(task.Action)
+					} else {
+						err = ExecuteTaskAction(task)
+					}
 				}
 
 				if err == nil {
@@ -254,7 +299,11 @@ func RunWorkflow(
 				return
 			} else {
 				state.Status = "completed"
+				state.Result = classifyResult
 				inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s completed.", task.Name))
+				if classifyResult != "" {
+					inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s AI classification result: %s", task.Name, classifyResult))
+				}
 				recordReplaySnapshot(inst, task.Name, "completed", fmt.Sprintf("Task %s completed successfully", task.Name))
 				completedCount++
 				progressMade = true
@@ -481,4 +530,61 @@ func RollbackSaga(
 			SaveCheckpoint(inst, store, instances, instancesMu)
 		}
 	}
+}
+
+func RunAIClassify(action string) (string, error) {
+	if !strings.HasPrefix(action, "ai.classify(") {
+		return "", fmt.Errorf("invalid AI action format")
+	}
+	content := strings.TrimPrefix(action, "ai.classify(")
+	content = strings.TrimSuffix(content, ")")
+
+	firstQuoteIdx := strings.Index(content, "\"")
+	if firstQuoteIdx == -1 {
+		return "", fmt.Errorf("invalid AI action: missing input quote")
+	}
+	secondQuoteIdx := strings.Index(content[firstQuoteIdx+1:], "\"")
+	if secondQuoteIdx == -1 {
+		return "", fmt.Errorf("invalid AI action: mismatched input quote")
+	}
+	secondQuoteIdx += firstQuoteIdx + 1
+
+	inputText := content[firstQuoteIdx+1 : secondQuoteIdx]
+
+	optionsStart := strings.Index(content, "[")
+	optionsEnd := strings.Index(content, "]")
+	if optionsStart == -1 || optionsEnd == -1 {
+		return "", fmt.Errorf("invalid AI action: missing options array")
+	}
+	optionsStr := content[optionsStart+1 : optionsEnd]
+
+	var options []string
+	for _, opt := range strings.Split(optionsStr, ",") {
+		opt = strings.TrimSpace(opt)
+		opt = strings.Trim(opt, "\"'")
+		if opt != "" {
+			options = append(options, opt)
+		}
+	}
+	if len(options) == 0 {
+		return "", fmt.Errorf("invalid AI action: no options provided")
+	}
+
+	inputLower := strings.ToLower(inputText)
+	if strings.Contains(inputLower, "scam") || strings.Contains(inputLower, "suspicious") || strings.Contains(inputLower, "fraud") {
+		for _, opt := range options {
+			if opt == "reject" || opt == "review" {
+				return opt, nil
+			}
+		}
+	}
+	if strings.Contains(inputLower, "good") || strings.Contains(inputLower, "vip") || strings.Contains(inputLower, "valid") {
+		for _, opt := range options {
+			if opt == "approve" {
+				return opt, nil
+			}
+		}
+	}
+
+	return options[0], nil
 }
