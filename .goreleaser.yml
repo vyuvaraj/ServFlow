@@ -75,5 +75,25 @@ scoops:
     description: "Workflow orchestration and pipeline service from the ServVerse platform"
     license: "Apache-2.0"
 
+
+nfpms:
+  - id: servflow-pkg
+    package_name: servflow
+    builds: [servflow]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServFlow
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Workflow orchestration engine from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servflow/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
 release:
   mode: replace
