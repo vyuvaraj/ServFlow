@@ -1,12 +1,12 @@
 module servflow
 
-go 1.23.0
+go 1.25.0
 
 require (
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/go-stomp/stomp/v3 v3.1.5
 	github.com/lib/pq v1.12.3
-	github.com/vyuvaraj/ServShared v1.0.2-0.20260714131806-8f86487bce70
+	github.com/vyuvaraj/ServShared v1.0.2-0.20260719054743-81a270f75198
 	modernc.org/sqlite v1.53.0
 )
 
@@ -23,3 +23,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+replace github.com/vyuvaraj/ServShared => ../ServShared
